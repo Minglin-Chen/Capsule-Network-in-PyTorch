@@ -1,0 +1,9 @@
+# ignore generated stuff
+/weights/*
+/logs/*
+
+# ignore python cache
+__pycache__/
+
+# ignore setting of vscode
+/.vscode/*
