@@ -1,5 +1,4 @@
-import os
-
+import os 
 import torch
 import torch.nn as nn
 import torchvision
@@ -8,11 +7,11 @@ from dataset import dataset_provider
 from torch.utils.data import DataLoader
 # Model
 from models import model_provider
-
-import torch.optim as optim
+# Loss
+from criterion import criterion_provider
 # Log
 import time
-from tensorboard_logger import Logger
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 # Configuration
@@ -33,8 +32,17 @@ def train_op(net, dataloader, criterion, optimizer, epoch, logger):
         images, labels = images.cuda(config['device_ids'][0]), labels.cuda(config['device_ids'][0])
 
         # 1. calculate loss
-        probs = net(images)
-        loss = criterion(probs, labels)
+        if config['model'] == 'BaselineNet':
+            probs = net(images)
+            loss = criterion(probs, labels)
+        elif config['model'] == 'CapsNet':
+            probability, capsule_embedding = net(images)
+            loss = criterion(probability, labels)
+        elif config['model'] == 'CapsNet_with_Decoder':
+            probability, capsule_embedding, reconstruction = net(images, labels)
+            loss = criterion(probability, labels, reconstruction, images)
+        else:
+            raise NotImplementedError('Not implemented')
 
         # 2. update weights
         optimizer.zero_grad()
@@ -47,7 +55,7 @@ def train_op(net, dataloader, criterion, optimizer, epoch, logger):
         if i % n == n-1:
             print('[Epoch {:0>3} Step {:0>3}/{:0>3}] Loss {:.4f} Time {:.2f} s'.format(
                 epoch+1, i+1, len(dataloader), running_loss/n, time.time()-start_t))
-            logger.log_value('loss', running_loss/n, step=i+epoch*len(dataloader))
+            logger.add_scalar('loss', running_loss/n, global_step=i+epoch*len(dataloader))
             # reinitialization
             running_loss = 0.0
             start_t = time.time()
@@ -65,14 +73,21 @@ def eval_op(net, dataloader, criterion, epoch, logger):
             images, labels = images.cuda(config['device_ids'][0]), labels.cuda(config['device_ids'][0])
 
             # 1. forward
-            prob = net(images)
-            _, predicted = torch.max(prob.data, 1)
+            if config['model'] == 'BaselineNet':
+                prob = net(images)
+                _, predicted = torch.max(prob.data, 1)
+            elif config['model'] == 'CapsNet':
+                probability, capsule_embedding = net(images)
+                _, predicted = torch.max(probability.data, 1)
+            elif config['model'] == 'CapsNet_with_Decoder':
+                probability, capsule_embedding = net(images)
+                _, predicted = torch.max(probability.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
         # logger
         print('Accuracy of the network on the 10000 test images: {:.2f} %'.format(100.0 * correct / total))
-        logger.log_value('Eval Accuracy', float(correct)/total, epoch)
+        logger.add_scalar('Eval Accuracy', float(correct)/total, global_step=epoch)
 
 def trainer():
 
@@ -87,15 +102,15 @@ def trainer():
     net = nn.DataParallel(net, device_ids=config['device_ids'])
 
     # 3. Criterion
-    criterion = nn.CrossEntropyLoss().cuda(config['device_ids'][0])
+    criterion = criterion_provider(config['criterion'], **config['criterion_param']).cuda(config['device_ids'][0])
 
     # 4. Optimizer
     optimizer = config['optimizer'](net.parameters(), **config['optimizer_param'])
     scheduler = config['scheduler'](optimizer, **config['scheduler_param']) if config['scheduler'] else None
 
     # 5. Tensorboard logger
-    logger_train = Logger('logs/train')
-    logger_eval = Logger('logs/eval')
+    logger_train = SummaryWriter('logs/train/{}/{}'.format(config['dataset_name'], config['model']))
+    logger_eval = SummaryWriter('logs/eval/{}/{}'.format(config['dataset_name'], config['model']))
 
     # 6. Train loop
     for epoch in range(config['num_epoch']):

@@ -1,6 +1,7 @@
 # ignore generated stuff
 /weights/*
 /logs/*
+/data/*
 
 # ignore python cache
 __pycache__/
