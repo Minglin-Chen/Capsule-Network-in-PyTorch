@@ -61,7 +61,7 @@ class CapsConv2D(nn.Module):
             bias=False)
 
         # coupling coefficient logits
-        if num_iter > 0:
+        if self.num_iter > 0:
             self.bias = nn.Parameter( 
                 torch.zeros(1, self.in_caps_num, self.out_caps_num, 1, 1, 1),
                 requires_grad=bias_train)
